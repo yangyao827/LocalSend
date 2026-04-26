@@ -39,4 +39,3 @@
 ## 📦 技术栈
 - **后端**: Python / FastAPI / WebSocket
 - **前端**: 原生 HTML5 / CSS3 / JavaScript
-- **打包**: zipfile (多文件自动压缩)
