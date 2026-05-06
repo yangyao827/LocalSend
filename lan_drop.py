@@ -726,29 +726,29 @@ async def websocket_endpoint(websocket: WebSocket):
     client_id, client_ip = await manager.connect(websocket)
     try:
         await websocket.send_text(json.dumps({"type": "your_id", "id": client_id}))
-        
+
         known_name = manager.ip_name_map.get(client_ip, "")
         await websocket.send_text(json.dumps({"type": "init_ack", "name": known_name}))
 
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
-            
+
             if msg["type"] == "join":
                 name = msg.get("name", "Unknown")
                 manager.device_names[client_id] = name
                 manager.ip_name_map[client_ip] = name
                 save_devices(manager.ip_name_map)
-                
+
                 await manager.broadcast_devices()
-                
+
             elif msg["type"] == "text_msg":
                 await manager.send_to(msg.get("to_id"), {
                     "type": "text_msg",
                     "from_name": manager.device_names.get(client_id, "Unknown"),
                     "text": msg.get("text")
                 })
-                
+
             elif msg["type"] == "file_request":
                 await manager.send_to(msg.get("to_id"), {
                     "type": "file_request",
@@ -758,21 +758,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     "total_size": msg.get("total_size", 0),
                     "file_count": msg.get("file_count", 0)
                 })
-                
+
             elif msg["type"] == "file_response":
                 await manager.send_to(msg.get("to_id"), {
                     "type": "file_response",
                     "from_id": client_id,
                     "accept": msg.get("accept")
                 })
-                
+
             elif msg["type"] == "progress":
                 await manager.send_to(msg.get("to_id"), {
                     "type": "progress",
-                    "from_id": client_id, 
+                    "from_id": client_id,
                     "progress": msg.get("progress")
                 })
-                
+
     except WebSocketDisconnect:
         manager.disconnect(client_id)
         await manager.broadcast_devices()
@@ -780,22 +780,22 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/upload")
 async def upload_files(to_id: str = Form(...), files: List[UploadFile] = File(...)):
     file_info_list = []
-    
+
     for file in files:
         file_id = str(uuid.uuid4())
         file_path = os.path.join(TEMP_DIR, file_id)
-        
+
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
+
         file_info_list.append({
             "url": f"/download/{file_id}/{file.filename}",
             "file_name": file.filename
         })
-        
+
     await manager.send_to(to_id, {
         "type": "file_ready",
-        "files": file_info_list 
+        "files": file_info_list
     })
     return {"status": "ok"}
 
@@ -808,7 +808,7 @@ async def download_file(file_id: str, file_name: str, background_tasks: Backgrou
                 os.remove(file_path)
             except Exception as e:
                 pass
-                
+
         background_tasks.add_task(remove_temp_file)
         return FileResponse(path=file_path, filename=file_name)
     return {"error": "File not found or already deleted"}
