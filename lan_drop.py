@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, F
 from fastapi.responses import HTMLResponse, FileResponse
 import uvicorn
 
-# === 新增下面这段代码：强迫 PyInstaller 把这两个隐藏依赖塞进 exe 里 ===
+# === 强迫 PyInstaller 把这两个隐藏依赖塞进 exe 里 ===
 try:
     import multipart
 except ImportError:
@@ -53,18 +53,55 @@ HTML_CONTENT = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>局域网互传助手</title>
     <style>
-        body { margin: 0; padding: 0; background: #f4f7f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; touch-action: manipulation; }
+        body { 
+            margin: 0; padding: 0; 
+            background: #ffffff; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            display: flex; flex-direction: column; height: 100vh; overflow: hidden; touch-action: manipulation; 
+        }
         
-        .container { flex: 1; position: relative; overflow: hidden; width: 100%; box-sizing: border-box; }
+        .container { 
+            flex: 1; position: relative; overflow: hidden; width: 100%; box-sizing: border-box; 
+        }
+
+        /* === 动态扩散波纹背景 === */
+        .bg-waves {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            overflow: hidden;
+            z-index: 1; 
+            pointer-events: none; 
+        }
+
+        .wave {
+            position: absolute;
+            top: 75%; left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: 1px solid rgba(0, 0, 0, 0.08); 
+            width: 0; height: 0;
+            /* 保持你满意的 15s 扩散速度不变 */
+            animation: ripple 15s linear infinite; 
+        }
+
+        @keyframes ripple {
+            0% {
+                width: 0px;
+                height: 0px;
+            }
+            100% {
+                width: max(250vw, 250vh);
+                height: max(250vw, 250vh);
+            }
+        }
         
         /* 气泡外壳 */
         .bubble-wrap { position: absolute; transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1); z-index: 5; }
 
-        /* --- 恢复原本鲜艳的渐变底色 --- */
         .bubble { 
             width: 100%; height: 100%; 
             border-radius: 50%; 
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); /* 蓝青色 */
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
             color: white; 
             display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; 
             font-weight: bold; 
@@ -73,43 +110,41 @@ HTML_CONTENT = """
             user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; 
             word-break: break-all; padding: 5%; box-sizing: border-box; 
             animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; 
-            transition: margin 3s ease-in-out, transform 0.1s; 
+            transition: margin 3s ease-in-out, transform 0.2s, box-shadow 0.2s; 
             position: relative; 
-            overflow: hidden; /* 极其重要：把超出的水切掉，保持圆形 */
+            overflow: hidden; 
         }
         
-        /* 自己的气泡：恢复橙黄色 */
+        .bubble.drag-over {
+            transform: scale(1.1) !important;
+            box-shadow: 0 0 30px rgba(0, 242, 254, 0.9);
+        }
+
         .bubble.self { 
             background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); 
             box-shadow: 0 10px 25px rgba(253, 160, 133, 0.4); 
         }
         .bubble:active { transform: scale(0.9) !important; }
         
-        /* --- 纯净的水层：去掉了旋转白框 --- */
         .water {
             position: absolute;
             bottom: 0; left: 0;
             width: 100%;
-            height: 0%; /* 初始没水 */
-            background: rgba(0, 230, 118, 0.95); /* 鲜艳的绿色，带一丢丢透明度融合底色 */
-            transition: height 0.2s linear; /* 平滑上升 */
-            z-index: 1; /* 藏在文字下面 */
+            height: 0%; 
+            background: rgba(0, 230, 118, 0.95); 
+            transition: height 0.2s linear; 
+            z-index: 1; 
         }
 
-        /* 确保文字永远在水上面 */
-        .bubble-text {
-            position: relative;
-            z-index: 10; 
-        }
+        .bubble-text { position: relative; z-index: 10; }
         
         @keyframes popIn { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         
-        /* 模态弹窗和吐司样式保持不变 */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
         .modal { background: white; padding: 25px; border-radius: 16px; width: 85%; max-width: 350px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.2); animation: slideUp 0.3s ease; }
         @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .modal h3 { margin-top: 0; color: #333; }
-        .modal p { color: #555; line-height: 1.5; word-break: break-all; max-height: 200px; overflow-y: auto;} /* 增加内容过长时的滚动支持 */
+        .modal p { color: #555; line-height: 1.5; word-break: break-all; max-height: 200px; overflow-y: auto;} 
         
         .btn-group { display: flex; justify-content: space-around; margin-top: 20px; }
         .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; color: white; font-weight: bold; flex: 1; margin: 0 5px; transition: opacity 0.2s; }
@@ -127,7 +162,27 @@ HTML_CONTENT = """
     </style>
 </head>
 <body>
-    <div class="container" id="bubbleContainer"></div>
+    <div class="container" id="bubbleContainer">
+        <!-- 完美的无缝衔接：15个元素填满15秒的生命周期，每秒发射一次 -->
+        <div class="bg-waves">
+            <div class="wave" style="animation-delay: 0s;"></div>
+            <div class="wave" style="animation-delay: -1s;"></div>
+            <div class="wave" style="animation-delay: -2s;"></div>
+            <div class="wave" style="animation-delay: -3s;"></div>
+            <div class="wave" style="animation-delay: -4s;"></div>
+            <div class="wave" style="animation-delay: -5s;"></div>
+            <div class="wave" style="animation-delay: -6s;"></div>
+            <div class="wave" style="animation-delay: -7s;"></div>
+            <div class="wave" style="animation-delay: -8s;"></div>
+            <div class="wave" style="animation-delay: -9s;"></div>
+            <div class="wave" style="animation-delay: -10s;"></div>
+            <div class="wave" style="animation-delay: -11s;"></div>
+            <div class="wave" style="animation-delay: -12s;"></div>
+            <div class="wave" style="animation-delay: -13s;"></div>
+            <div class="wave" style="animation-delay: -14s;"></div>
+        </div>
+    </div>
+    
     <input type="file" id="fileInput" multiple> 
     <div id="toast"></div>
 
@@ -173,6 +228,10 @@ HTML_CONTENT = """
     </div>
 
     <script>
+        // 阻止浏览器全局拖拽默认行为
+        document.addEventListener('dragover', (e) => e.preventDefault());
+        document.addEventListener('drop', (e) => e.preventDefault());
+
         // 防缩放代码
         document.addEventListener('touchstart', function(event) { if (event.touches.length > 1) { event.preventDefault(); } }, { passive: false });
         document.addEventListener('gesturestart', function(event) { event.preventDefault(); });
@@ -187,7 +246,7 @@ HTML_CONTENT = """
         let myId;
         let myName;
         let pendingTargetId = null;
-        let selectedFiles = []; // 改为数组存储多个文件
+        let selectedFiles = []; 
         let currentRequestSender = null;
         let currentDevices = []; 
         let currentReceivedText = ""; 
@@ -224,16 +283,12 @@ HTML_CONTENT = """
             }
         }
 
-        // --- 干净利落的“装水”逻辑 ---
         function updateProgress(deviceId, percent) {
             const waterEl = document.getElementById(`water-${deviceId}`);
             if (waterEl) {
                 waterEl.style.height = `${percent}%`;
-                // 装满了，延迟一小会抽干，恢复气泡原样
                 if (percent >= 100) {
-                    setTimeout(() => {
-                        waterEl.style.height = "0%"; 
-                    }, 1000);
+                    setTimeout(() => { waterEl.style.height = "0%"; }, 1000);
                 }
             }
         }
@@ -241,8 +296,6 @@ HTML_CONTENT = """
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-            ws.onopen = () => {};
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -268,12 +321,9 @@ HTML_CONTENT = """
                     document.getElementById("textModal").style.display = "flex";
                 } else if (data.type === "file_request") {
                     currentRequestSender = data.from_id;
-                    
-                    // 构造接收多文件的提示信息
                     let fileListHtml = data.file_names.length > 3 
                         ? data.file_names.slice(0, 3).join("<br>") + `<br>...等 ${data.file_count} 个文件`
                         : data.file_names.join("<br>");
-
                     const msg = `来自 <b>${data.from_name}</b> 分享了 ${data.file_count} 个文件：<br><br><span style="font-size:14px;">${fileListHtml}</span><br><br>总计: ${formatBytes(data.total_size)}<br><br>是否全部接收？`;
                     
                     document.getElementById("modalMessage").innerHTML = msg;
@@ -284,15 +334,13 @@ HTML_CONTENT = """
                         uploadFile(data.from_id);
                     } else {
                         showToast("对方拒绝了您的文件。");
-                        selectedFiles = []; // 清空选中的文件
+                        selectedFiles = [];
                     }
                 } else if (data.type === "progress") {
-                    // 接收方同步更新
                     updateProgress(data.from_id, data.progress);
                 } else if (data.type === "file_ready") {
                     if (data.files && data.files.length > 0) {
                         showToast(`开始下载 ${data.files.length} 个文件...`);
-                        // 稍微延迟间隔下载，防止浏览器拦截批量弹窗
                         data.files.forEach((fileInfo, index) => {
                             setTimeout(() => {
                                 downloadFile(fileInfo.url, fileInfo.file_name);
@@ -301,13 +349,13 @@ HTML_CONTENT = """
                     }
                 }
             };
-            ws.onclose = () => { showToast("连接断开，正在尝试重连..."); setTimeout(connect, 2000); };
+            ws.onclose = () => { showToast("连接断开，正在重连..."); setTimeout(connect, 2000); };
         }
 
         function copyMessage() {
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(currentReceivedText).then(() => {
-                    showToast("✅ 已复制到剪贴板");
+                    showToast("✅ 已复制");
                 }).catch(() => fallbackCopyTextToClipboard(currentReceivedText));
             } else {
                 fallbackCopyTextToClipboard(currentReceivedText);
@@ -317,39 +365,63 @@ HTML_CONTENT = """
         function fallbackCopyTextToClipboard(text) {
             const textArea = document.createElement("textarea");
             textArea.value = text;
-            textArea.style.top = "0";
-            textArea.style.left = "0";
             textArea.style.position = "fixed";
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
             try {
-                const successful = document.execCommand('copy');
-                if(successful) showToast("✅ 已复制到剪贴板");
-                else showToast("❌ 复制失败，请手动选择复制");
-            } catch (err) {
-                showToast("❌ 复制失败，请手动选择复制");
-            }
+                if(document.execCommand('copy')) showToast("✅ 已复制");
+                else showToast("❌ 复制失败");
+            } catch (err) { showToast("❌ 复制失败"); }
             document.body.removeChild(textArea);
         }
 
+        // ================= 扇形布局核心重构 =================
         function renderBubbles(devices) {
             const container = document.getElementById("bubbleContainer");
-            container.innerHTML = "";
+            
+            // 清理除了 bg-waves 波纹之外的子节点，保留波纹
+            Array.from(container.children).forEach(child => {
+                if (!child.classList.contains('bg-waves')) {
+                    child.remove();
+                }
+            });
             
             let myDevice = devices.find(d => d.id === myId);
             let others = devices.filter(d => d.id !== myId);
 
             const minDim = Math.min(container.clientWidth, container.clientHeight);
-            globalBubbleSize = Math.max(80, Math.min(minDim * 0.15, 200));
-            const radius = Math.max(120, Math.min(minDim * 0.35, minDim / 2 - globalBubbleSize / 2 - 10));
+            globalBubbleSize = Math.max(80, Math.min(minDim * 0.15, 180));
+            
+            // 自己的气泡固定在偏下方区域
+            const selfOffsetY = container.clientHeight * 0.25; 
 
-            if (myDevice) createBubbleNode(myDevice, container, true, 0, 0, globalBubbleSize);
+            // 计算扇形的半径
+            const fanRadius = Math.min(container.clientWidth * 0.35, container.clientHeight * 0.4);
 
+            if (myDevice) createBubbleNode(myDevice, container, true, 0, selfOffsetY, globalBubbleSize);
+
+            // 其他气泡呈扇形排布
             others.forEach((dev, index) => {
-                const angle = (index / others.length) * 2 * Math.PI - (Math.PI / 2);
-                const x = radius * Math.cos(angle);
-                const y = radius * Math.sin(angle);
+                let angle;
+                if (others.length === 1) {
+                    angle = Math.PI / 2; 
+                } else {
+                    const baseStep = Math.PI / 3; 
+                    const maxSpan = Math.PI * 0.83; 
+                    
+                    let currentSpan = baseStep * (others.length - 1);
+                    if (currentSpan > maxSpan) {
+                        currentSpan = maxSpan;
+                    }
+                    
+                    const startAngle = Math.PI / 2 + currentSpan / 2;
+                    angle = startAngle - (index / (others.length - 1)) * currentSpan;
+                }
+                
+                const x = fanRadius * Math.cos(angle);
+                const y = selfOffsetY - fanRadius * Math.sin(angle);
+                
                 createBubbleNode(dev, container, false, x, y, globalBubbleSize);
             });
         }
@@ -363,26 +435,22 @@ HTML_CONTENT = """
             wrap.style.top = `calc(50% - ${size / 2}px + ${offsetY}px)`;
             wrap.style.zIndex = isSelf ? 10 : 5;
 
-            // 气泡主体
             const bubble = document.createElement("div");
             bubble.className = "bubble" + (isSelf ? " self" : "");
 
-            // 纯净水层
             const water = document.createElement("div");
             water.className = "water";
             water.id = `water-${dev.id}`;
             bubble.appendChild(water);
 
-            // 文字层
             const textSpan = document.createElement("span");
             textSpan.className = "bubble-text";
             const fontSize = Math.max(12, Math.min(size * 0.15, 18));
             textSpan.style.fontSize = `${fontSize}px`;
-            const mark = isSelf ? `<br><span style='font-size:${fontSize*0.8}px;opacity:0.8'>(我)</span>` : "";
+            const mark = isSelf ? `<br><span style='font-size:${fontSize*0.8}px;opacity:0.8'>(本机)</span>` : "";
             textSpan.innerHTML = dev.name + mark;
             bubble.appendChild(textSpan);
 
-            // 初始随机偏移量
             const movementRange = size * 0.2;
             bubble.style.marginTop = `${(Math.random() - 0.5) * movementRange}px`;
             bubble.style.marginLeft = `${(Math.random() - 0.5) * movementRange}px`;
@@ -445,12 +513,39 @@ HTML_CONTENT = """
             element.addEventListener('touchcancel', endPress, {passive: false});
         }
 
+        // ================= 添加拖拽交互 =================
         function setupBubbleInteraction(element, targetId, targetName) {
             let pressTimer;
             let isLongPress = false;
             let isTouch = false;
 
             element.addEventListener('contextmenu', e => e.preventDefault());
+
+            // 1. 拖入气泡时的视觉反馈
+            element.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                element.classList.add('drag-over');
+            });
+
+            // 2. 离开气泡取消反馈
+            element.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                element.classList.remove('drag-over');
+            });
+
+            // 3. 放下文件直接发起传输
+            element.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                element.classList.remove('drag-over');
+                
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    pendingTargetId = targetId;
+                    handleFilesSelected(e.dataTransfer.files, targetId);
+                }
+            });
 
             const startPress = (e) => {
                 if (e.type === 'touchstart') isTouch = true;
@@ -493,24 +588,29 @@ HTML_CONTENT = """
             closeModal("inputModal");
         }
 
-        // 修改：处理多文件选择并发起请求
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            if (e.target.files.length > 0 && pendingTargetId) {
-                selectedFiles = Array.from(e.target.files);
+        // 统一提取的发送请求核心函数
+        function handleFilesSelected(files, targetId) {
+            if (files.length > 0 && targetId) {
+                selectedFiles = Array.from(files);
                 
                 let totalSize = selectedFiles.reduce((acc, f) => acc + f.size, 0);
                 let fileNames = selectedFiles.map(f => f.name);
 
                 ws.send(JSON.stringify({
                     type: "file_request",
-                    to_id: pendingTargetId,
+                    to_id: targetId,
                     file_names: fileNames,
                     total_size: totalSize,
                     file_count: selectedFiles.length
                 }));
                 showToast("已发送请求，等待对方确认...");
             }
-            e.target.value = ""; // 重置 input 方便下次选择同名文件
+        }
+
+        // 文件选取后调用
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            handleFilesSelected(e.target.files, pendingTargetId);
+            e.target.value = ""; 
         });
 
         function acceptFile() {
@@ -528,10 +628,7 @@ HTML_CONTENT = """
             if (!selectedFiles || selectedFiles.length === 0) return;
             const formData = new FormData();
             
-            // 将所有文件附加到 formData 中
-            selectedFiles.forEach(file => {
-                formData.append("files", file); 
-            });
+            selectedFiles.forEach(file => { formData.append("files", file); });
             formData.append("to_id", targetId);
 
             const xhr = new XMLHttpRequest();
@@ -555,7 +652,7 @@ HTML_CONTENT = """
                     updateProgress(targetId, 0); 
                     ws.send(JSON.stringify({ type: "progress", to_id: targetId, progress: 0 }));
                 }
-                selectedFiles = []; // 上传完毕清理
+                selectedFiles = []; 
             };
 
             xhr.onerror = function() {
@@ -564,7 +661,6 @@ HTML_CONTENT = """
                 ws.send(JSON.stringify({ type: "progress", to_id: targetId, progress: 0 }));
                 selectedFiles = [];
             };
-
             xhr.send(formData);
         }
 
@@ -654,7 +750,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
                 
             elif msg["type"] == "file_request":
-                # 修改：同步支持多文件的请求数据传输
                 await manager.send_to(msg.get("to_id"), {
                     "type": "file_request",
                     "from_id": client_id,
@@ -682,7 +777,6 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(client_id)
         await manager.broadcast_devices()
 
-# 修改：支持 List[UploadFile] 多文件上传
 @app.post("/upload")
 async def upload_files(to_id: str = Form(...), files: List[UploadFile] = File(...)):
     file_info_list = []
@@ -701,26 +795,21 @@ async def upload_files(to_id: str = Form(...), files: List[UploadFile] = File(..
         
     await manager.send_to(to_id, {
         "type": "file_ready",
-        "files": file_info_list # 把多文件的链接列表打包发给接收方
+        "files": file_info_list 
     })
     return {"status": "ok"}
 
-# 修改：加入 BackgroundTasks 阅后即焚（下载完立即删除服务器本地的临时文件）
 @app.get("/download/{file_id}/{file_name}")
 async def download_file(file_id: str, file_name: str, background_tasks: BackgroundTasks):
     file_path = os.path.join(TEMP_DIR, file_id)
     if os.path.exists(file_path):
-        
-        # 定义一个删除文件的后台任务
         def remove_temp_file():
             try:
                 os.remove(file_path)
             except Exception as e:
                 pass
                 
-        # 挂载到 background_tasks，FastAPI会在文件响应流结束（下载完成）后自动调用它
         background_tasks.add_task(remove_temp_file)
-        
         return FileResponse(path=file_path, filename=file_name)
     return {"error": "File not found or already deleted"}
 
